@@ -1,0 +1,66 @@
+stages:
+  - CreateInfra
+  - SetUpServer
+  - DeployContainer
+  - DestroyInfra
+
+cache:
+  paths:
+    - server_ip
+
+CreateInfra:
+  stage: CreateInfra
+  image:
+    name: hashicorp/terraform
+    entrypoint: [""]
+  script:
+    - terraform init
+    - terraform apply -auto-approve
+    - terraform output server_ip > server_ip
+  except:
+    variables:
+      - $DESTROY == "true"
+
+SetUpServer:
+  stage: SetUpServer
+  image: alpine
+  script:
+    - apk add ansible openssh-client
+    - mkdir ~/.ssh
+    - ssh-keyscan $(cat server_ip) > ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - eval $(ssh-agent -s)
+    - chmod 400 $PRIVATE_KEY
+    - ssh-add $PRIVATE_KEY
+    - ansible-playbook -i server_ip -u ubuntu playbook.yml
+  except:
+    variables:
+      - $DESTROY == "true"
+
+DeployContainer:
+  stage: DeployContainer
+  image: alpine
+  script:
+    - apk add openssh-client
+    - mkdir ~/.ssh
+    - ssh-keyscan $(cat server_ip) > ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - eval $(ssh-agent -s)
+    - chmod 400 $PRIVATE_KEY
+    - ssh-add $PRIVATE_KEY
+    - ssh ubuntu@$(cat server_ip) docker run -p 80:80 -d nginx
+  except:
+    variables:
+      - $DESTROY == "true"
+
+DestroyInfra:
+  stage: DestroyInfra
+  image:
+    name: hashicorp/terraform
+    entrypoint: [""]
+  script:
+    - terraform init
+    - terraform destroy -auto-approve
+  only:
+    variables:
+      - $DESTROY == "true"
